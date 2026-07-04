@@ -1,0 +1,4 @@
+/.build/
+/Sigstore-Perl-*/
+/Sigstore-Perl-*.tar.gz
+!/.gitignore
