@@ -94,7 +94,9 @@ sub load($class, $bundle) {
 		$result{cert} = Crypt::OpenSSL3::X509->decode_der(decode_base64($certificate_raw));
 	} elsif (my $certificate_raw2 = $bundle->{verificationMaterial}{x509CertificateChain}{certificates}) {
 		croak 'No certificates' unless $certificate_raw2->@*;
-		$result{cert} = Crypt::OpenSSL3::X509->decode_der(decode_base64($certificate_raw2->[0]{rawBytes})) or die;
+		my @certs = map { Crypt::OpenSSL3::X509->decode_der(decode_base64($_->{rawBytes})) } $certificate_raw2->@*;
+		$result{cert} = shift @certs or croak 'No certificates';
+		$result{untrusted} = \@certs if $result{version} < 3;
 	} elsif (my $public_key_hint = $bundle->{verificationMaterial}{publicKey}{hint}) {
 		$result{key_hint} = decode_base64($public_key_hint);
 	} else {
@@ -215,7 +217,7 @@ sub verify($self, $content, $trusted_root, %options) {
 		my $verified = 0;
 		my $timestamps = $self->{signed_timestamps} // [];
 		for my $timestamp (@timestamps) {
-			$verified++ if $trusted_root->verify_certificate($cert, $timestamp);
+			$verified++ if $trusted_root->verify_certificate($cert, $timestamp, $self->{untrusted});
 		}
 
 		croak 'Could not verify certificate' if not $verified;

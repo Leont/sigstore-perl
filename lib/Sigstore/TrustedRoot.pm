@@ -136,9 +136,10 @@ sub verify_timestamp($self, $signature, $timestamp_der) {
 	return $verified ? $signed_timestamp->get_tst_info->get_time : undef;
 }
 
-sub verify_certificate($self, $certificate, $timestamp) {
+sub verify_certificate($self, $certificate, $timestamp, $untrusted = undef) {
 	my $cert_context = Crypt::OpenSSL3::X509::Store::Context->new;
 	$cert_context->init($self->{cert_store}, $certificate);
+	$cert_context->set_untrusted($untrusted) if $untrusted;
 	$cert_context->set_time($timestamp);
 	return $cert_context->verify;
 }
