@@ -201,6 +201,17 @@ sub verify($self, $content, $trusted_root, %options) {
 			my $bio = Crypt::OpenSSL3::BIO->new_mem;
 			$self->{cert}->write_pem($bio);
 			next if decode_base64($decoded->{spec}{signatures}[0]{verifier}) ne $bio->read($bio->pending);
+		} elsif ($tlog->{kind} eq 'intoto') {
+			if (my $cert = $self->{cert}) {
+				next if decode_base64(decode_base64($decoded->{spec}{content}{envelope}{payload})) ne $self->{dsse}{payload};
+				my $bio = Crypt::OpenSSL3::BIO->new_mem;
+				my $left = decode_base64($decoded->{spec}{content}{envelope}{signatures}[0]{publicKey});
+				$bio->write($left);
+				my ($type, $headers, $payload) = Crypt::OpenSSL3::PEM::read($bio);
+				next if $payload ne $cert->encode_der;
+				next if decode_base64(decode_base64($decoded->{spec}{content}{envelope}{signatures}[0]{sig})) ne $signature;
+				next if pack('H*', $decoded->{spec}{content}{payloadHash}{value}) ne digest($sha256, $self->{dsse}{payload});
+			}
 		}
 		$valid_logs++;
 

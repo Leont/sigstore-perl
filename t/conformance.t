@@ -22,8 +22,6 @@ for my $casename (sort grep !/^\./, readdir $dh) {
 
 	SKIP:
 	{
-		skip "$casename: intoto entries not implemented", 1 if $casename =~ /^intoto/;
-
 		my $case_artifact = catfile($casedir, 'artifact');
 		my $artifact = -e $case_artifact ? $case_artifact : $default_artifact;
 		my $case_trusted_root = catfile($casedir, 'trusted_root.json');
