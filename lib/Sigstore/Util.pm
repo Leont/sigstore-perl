@@ -5,7 +5,7 @@ use warnings;
 use experimental qw/signatures postderef lexical_subs/;
 
 use Exporter 'import';
-our @EXPORT_OK = qw/dsse_pae digest decode_cert read_binary %hash_for $sha256/;
+our @EXPORT_OK = qw/dsse_pae digest decode_cert read_binary parse_time %hash_for $sha256/;
 
 use Crypt::OpenSSL3;
 use Encode 'encode_utf8';
@@ -29,6 +29,10 @@ sub digest($md, $input) {
 sub dsse_pae($type, $payload) {
 	$type = encode_utf8($type);
 	return join ' ', 'DSSEv1', length $type, $type, length $payload, $payload;
+}
+
+sub parse_time($time_string) {
+	return Time::Piece->strptime(substr($time_string, 0, 19), '%Y-%m-%dT%H:%M:%S')
 }
 
 1;

@@ -5,12 +5,13 @@ use warnings;
 use experimental qw/signatures postderef lexical_subs/;
 
 use Crypt::OpenSSL3;
-use Sigstore::Util qw/decode_cert digest read_binary %hash_for/;
+use Sigstore::Util qw/decode_cert digest parse_time read_binary %hash_for/;
 
 use Carp;
 use JSON::PP;
 use File::Temp 'tempfile';
 use MIME::Base64;
+use Time::Piece;
 
 use constant {
 	VFY_DATA               => Crypt::OpenSSL3::Timestamp::Verifier::VFY_DATA,
@@ -61,15 +62,17 @@ sub load($class, $json) {
 		}
 	}
 
-	my $stamp_store = Crypt::OpenSSL3::X509::Store->new;
-	$stamp_store->set_purpose(PURPOSE_TIMESTAMP_SIGN) or croak "Can't set purpose to timestamp store";
-	my @stamp_certs;
+	my @stamp_items;
 	for my $ca ($json->{timestampAuthorities}->@*) {
 		my @certs = map { decode_cert($_->{rawBytes}) } $ca->{certChain}{certificates}->@*;
-		$stamp_store->add_cert(pop @certs) or croak "Can't add certificate to timestamp store";
-		push @stamp_certs, @certs;
+		my $start = parse_time($ca->{validFor}{start});
+		my $end = $ca->{validFor}{end} ? parse_time($ca->{validFor}{end}) : undef;
+		push @stamp_items, {
+			certs => \@certs,
+			start => $start,
+			end   => $end,
+		};
 	}
-
 
 	my $ctlog_store = Crypt::OpenSSL3::X509::Transparency::Log::Store->new;
 	my $ctlog_format = "enabled_logs=log%d\n\n[log%d]\ndescription = %s\nkey = %s\n";
@@ -104,8 +107,7 @@ sub load($class, $json) {
 	return bless {
 		cert_store  => $cert_store,
 		cert_by_id  => \%cert_by_id,
-		stamp_store => $stamp_store,
-		stamp_certs => \@stamp_certs,
+		stamp_items => \@stamp_items,
 		ctlog_store => $ctlog_store,
 		tlog_keys   => \%tlog_key_for,
 	}, $class;
@@ -113,17 +115,29 @@ sub load($class, $json) {
 
 sub verify_timestamp($self, $signature, $timestamp_der) {
 	my $signed_timestamp = Crypt::OpenSSL3::Timestamp::Response->decode_der($timestamp_der);
+	my $timestamp = $signed_timestamp->get_tst_info->get_time;
+
+	my $stamp_store = Crypt::OpenSSL3::X509::Store->new;
+	$stamp_store->set_purpose(PURPOSE_TIMESTAMP_SIGN) or croak "Can't set purpose to timestamp store";
+	my @stamp_certs;
+	for my $item ($self->{stamp_items}->@*) {
+		next if $timestamp < $item->{start};
+		next if defined $item->{end} && $timestamp > $item->{end};
+		my @certs = $item->{certs}->@*;
+		$stamp_store->add_cert(pop @certs) or croak "Can't add certificate to timestamp store";
+		push @stamp_certs, @certs;
+	}
 
 	my $verifier = Crypt::OpenSSL3::Timestamp::Verifier->new;
-	$verifier->set_store($self->{stamp_store}) or croak "Couldn't set timestamp certificate store";
-	$verifier->set_certs($self->{stamp_certs}) or croak "Coudln't set timestamp untrusted certificates";
+	$verifier->set_store($stamp_store) or croak "Couldn't set timestamp certificate store";
+	$verifier->set_certs(\@stamp_certs) or croak "Coudln't set timestamp untrusted certificates";
 	my $in = Crypt::OpenSSL3::BIO->new_mem;
 	$in->write($signature);
 	$verifier->set_data($in) or croak "Couldn't set timestamp data";
 	$verifier->set_flags(VFY_DATA | VFY_SIGNATURE) or croak 'Could not set timestamp flags';
 
 	my $verified = $verifier->verify_response($signed_timestamp);
-	return $verified ? $signed_timestamp->get_tst_info->get_time : undef;
+	return $verified ? $timestamp : undef;
 }
 
 sub verify_certificate($self, $certificate, $timestamp, $untrusted = undef) {
