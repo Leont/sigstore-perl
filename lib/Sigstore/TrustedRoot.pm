@@ -5,10 +5,10 @@ use warnings;
 use experimental qw/signatures postderef lexical_subs/;
 
 use Crypt::OpenSSL3;
+use Sigstore::Util qw/decode_cert digest read_binary %hash_for/;
 
 use Carp;
 use JSON::PP;
-use File::Slurper 'read_binary';
 use File::Temp 'tempfile';
 use MIME::Base64;
 
@@ -25,16 +25,6 @@ sub load_file($class, $filename) {
 	my $json = decode_json($content) or croak "Could not decode $filename";
 	return $class->load($json);
 }
-
-my sub decode_cert($certificate_raw) {
-	return Crypt::OpenSSL3::X509->decode_der(decode_base64($certificate_raw));
-}
-
-my %hash_for = (
-	SHA2_256 => Crypt::OpenSSL3::MD->fetch("SHA2-256"),
-	SHA2_384 => Crypt::OpenSSL3::MD->fetch("SHA2-384"),
-	SHA2_512 => Crypt::OpenSSL3::MD->fetch("SHA2-512"),
-);
 
 my %hash_for_signer = (
 	PKIX_RSA_PKCS1V15_2048_SHA256 => $hash_for{SHA2_256},
@@ -152,13 +142,6 @@ sub verify_sct($self, $cert, $sct, $time = time + 300) {
 	$ct_evaluator->set_time($time * 1000);
 	$ct_evaluator->set_issuer($issuer_cert);
 	return $sct->validate($ct_evaluator) ? $sct->get_timestamp / 1000 : undef;
-}
-
-my sub digest($md, $input) {
-	my $md_context = Crypt::OpenSSL3::MD::Context->new;
-	$md_context->init($md);
-	$md_context->update($input);
-	return $md_context->final;
 }
 
 my sub node_hash($digest, $left, $right) {

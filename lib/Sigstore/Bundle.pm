@@ -5,11 +5,10 @@ use warnings;
 use experimental qw/signatures postderef lexical_subs/;
 
 use Crypt::OpenSSL3;
+use Sigstore::Util qw/dsse_pae decode_cert digest read_binary %hash_for $sha256/;
 
 use Carp 'croak';
-use Encode 'encode_utf8';
 use JSON::PP 'decode_json';
-use File::Slurper 'read_binary';
 use MIME::Base64 'decode_base64';
 
 sub load_file($class, $filename) {
@@ -40,25 +39,6 @@ my %oids = (
 
 my @nids = map { Crypt::OpenSSL3::NID->create("1.3.6.1.4.1.57264.1.$_", lc $oids{$_} =~ tr/ /_/r, "Sigstore $oids{$_}") } keys %oids;
 my $issuer_fallback = Crypt::OpenSSL3::NID->create('1.3.6.1.4.1.57264.1.1', 'Issuer V1', 'Issuer V1');
-
-my %hash_for = (
-	SHA2_256 => Crypt::OpenSSL3::MD->fetch('SHA2-256'),
-	SHA2_384 => Crypt::OpenSSL3::MD->fetch('SHA2-384'),
-	SHA2_512 => Crypt::OpenSSL3::MD->fetch('SHA2-512'),
-);
-my $sha256 = $hash_for{SHA2_256};
-
-my sub digest($md, $input) {
-	my $md_context = Crypt::OpenSSL3::MD::Context->new;
-	$md_context->init($md);
-	$md_context->update($input);
-	return $md_context->final;
-}
-
-my sub dsse_pae($type, $payload) {
-	$type = encode_utf8($type);
-	return join ' ', 'DSSEv1', length $type, $type, length $payload, $payload;
-}
 
 sub load($class, $bundle) {
 	my %result;
@@ -91,10 +71,10 @@ sub load($class, $bundle) {
 	}
 
 	if (my $certificate_raw = $bundle->{verificationMaterial}{certificate}{rawBytes}) {
-		$result{cert} = Crypt::OpenSSL3::X509->decode_der(decode_base64($certificate_raw));
+		$result{cert} = decode_cert($certificate_raw);
 	} elsif (my $certificate_raw2 = $bundle->{verificationMaterial}{x509CertificateChain}{certificates}) {
 		croak 'No certificates' unless $certificate_raw2->@*;
-		my @certs = map { Crypt::OpenSSL3::X509->decode_der(decode_base64($_->{rawBytes})) } $certificate_raw2->@*;
+		my @certs = map { decode_cert($_->{rawBytes}) } $certificate_raw2->@*;
 		$result{cert} = shift @certs or croak 'No certificates';
 		$result{untrusted} = \@certs if $result{version} < 3;
 	} elsif (my $public_key_hint = $bundle->{verificationMaterial}{publicKey}{hint}) {
