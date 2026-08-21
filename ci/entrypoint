@@ -1,0 +1,98 @@
+#! /usr/bin/env perl
+
+use 5.012;
+use warnings;
+
+use File::Spec::Functions qw/catdir catfile updir/;
+use FindBin '$Bin';
+use lib catdir($Bin, updir, 'lib');
+
+use Getopt::Long;
+use JSON::PP;
+use Sigstore::Bundle;
+use Sigstore::Signer;
+use Sigstore::TrustedRoot;
+
+my $command = shift;
+die "No command given" unless defined $command;
+
+my $prod_dir    = catdir($Bin, updir, 'ci','prod');
+my $staging_dir = catdir($Bin, updir, 'ci', 'staging');
+
+if ($command eq 'verify-bundle') {
+	GetOptions(
+		staging                     => \my $staging,
+		'bundle=s'                  => \my $bundle_file,
+		'certificate-identity=s'    => \my $identity,
+		'certificate-oidc-issuer=s' => \my $issuer,
+		'key=s'                     => \my $key_file,
+		'trusted-root=s'            => \my $trusted_root_file,
+	) or die "invalid option";
+	die 'No bundle given' if not defined $bundle_file;
+	die "No such bundle $bundle_file" if not -e $bundle_file;
+	my $bundle = Sigstore::Bundle->load_file($bundle_file);
+
+	my $target_file = shift;
+	die "No file given" if not defined $target_file;
+
+	my $verify_method = 'verify_file';
+	my %verify_args;
+	if ($target_file =~ /^sha256:(.*)/) {
+		$verify_method = 'verify';
+		$verify_args{digest} = pack 'H*', $1;
+	} else {
+		die "No such file $target_file" if not -e $target_file;
+	}
+
+	if (!defined $trusted_root_file) {
+		my $dir = $staging ? $staging_dir : $prod_dir;
+		$trusted_root_file = catfile($dir, 'trusted_root.json');
+	}
+	-e $trusted_root_file or die "No such trusted root $trusted_root_file";
+	my $trusted_root = Sigstore::TrustedRoot->load_file($trusted_root_file);
+
+	if (defined $key_file) {
+		my $key_bio = Crypt::OpenSSL3::BIO->new_file($key_file, 'r');
+		$verify_args{public_key} = Crypt::OpenSSL3::PKey->read_pem_public_key($key_bio);
+	}
+
+	my $result = $bundle->$verify_method($target_file, $trusted_root, %verify_args);
+	die "Issuer is $result->{issuer}, should have been $issuer" if defined $issuer and $result->{issuer} ne $issuer;
+	die "Identity is $result->{identity}, should have been $identity" if defined $identity and $result->{identity} ne $identity;
+
+} elsif ($command eq 'sign-bundle') {
+	GetOptions(
+		staging            => \my $staging,
+		'in-toto'          => \my $intoto,
+		'identity-token=s' => \my $token,
+		'bundle=s'         => \my $bundle_file,
+		'trusted-root=s'   => \my $trusted_root_file,
+		'signing-config=s' => \my $config_file,
+	) or die "invalid option";
+
+	my $artifact = shift or die "No artifact given";
+	my $dir = $staging ? $staging_dir : $prod_dir;
+
+	$config_file = catfile($dir, 'signing_config.v0.2.json') if !defined $config_file;
+	-e $config_file or die "No such signed config $config_file";
+	my $signer = Sigstore::Signer->load_file($config_file);
+
+	$trusted_root_file = catfile($dir, 'trusted_root.json') if !defined $trusted_root_file;
+	-e $trusted_root_file or die "No such trusted root $trusted_root_file";
+	my $trusted_root = Sigstore::TrustedRoot->load_file($trusted_root_file);
+
+	my $method = $intoto ? 'attest_file' : 'sign_file';
+	my $bundle_data = $signer->$method($artifact, $token);
+	my $encoded = JSON::PP->new->pretty->utf8->encode($bundle_data);
+
+	if (!$intoto) {
+		my $bundle = Sigstore::Bundle->load($bundle_data);
+		$bundle->verify_file($artifact, $trusted_root);
+	}
+
+	open my $out, '>:raw', $bundle_file or die "Could not open $bundle_file for writing";
+	print $out $encoded or die;
+
+} else {
+	die "Unknown command $command";
+}

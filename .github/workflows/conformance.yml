@@ -1,0 +1,29 @@
+name: Conformance tests
+
+on:
+  push:
+    branches:
+    - "*"
+  pull_request:
+#  schedule:
+#  - cron: "45 7 * * 1,4"
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+
+    - run: perl -V
+    - name: install deps using cpanm
+      uses: perl-actions/install-with-cpanm@stable
+      with:
+        sudo: false
+        args: --sudo --from https://cpan.metacpan.org Crypt::OpenSSL3 File::Slurper IO::Socket::SSL
+    - name: Run conformance tests
+      uses: sigstore/sigstore-conformance@21533cde107c734ebc153c3e3a24d75fc9811a36 # v0.0.29
+      with:
+        entrypoint: ${{ github.workspace }}/ci/entrypoint
+        xfail: "test_verify*intoto-tsa-timestamp-outside-cert-validity_fail]
+            test_verify*rekor2-timestamp-with-expired-cert-chain]
+            test_sign_verify_rekor2"
