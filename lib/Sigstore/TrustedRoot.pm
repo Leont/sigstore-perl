@@ -119,6 +119,7 @@ sub verify_timestamp($self, $signature, $timestamp_der) {
 
 	my $stamp_store = Crypt::OpenSSL3::X509::Store->new;
 	$stamp_store->set_purpose(PURPOSE_TIMESTAMP_SIGN) or croak "Can't set purpose to timestamp store";
+	$stamp_store->get_param->set_time($timestamp);
 	my @stamp_certs;
 	for my $item ($self->{stamp_items}->@*) {
 		next if $timestamp < $item->{start};

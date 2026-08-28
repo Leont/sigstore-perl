@@ -24,5 +24,4 @@ jobs:
       uses: sigstore/sigstore-conformance@21533cde107c734ebc153c3e3a24d75fc9811a36 # v0.0.29
       with:
         entrypoint: ${{ github.workspace }}/ci/entrypoint
-        xfail: "test_verify*intoto-tsa-timestamp-outside-cert-validity_fail]
-            test_verify*rekor2-timestamp-with-expired-cert-chain]"
+        xfail: "test_verify*intoto-tsa-timestamp-outside-cert-validity_fail]"
