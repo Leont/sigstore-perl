@@ -25,5 +25,4 @@ jobs:
       with:
         entrypoint: ${{ github.workspace }}/ci/entrypoint
         xfail: "test_verify*intoto-tsa-timestamp-outside-cert-validity_fail]
-            test_verify*rekor2-timestamp-with-expired-cert-chain]
-            test_sign_verify_rekor2"
+            test_verify*rekor2-timestamp-with-expired-cert-chain]"

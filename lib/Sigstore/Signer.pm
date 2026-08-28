@@ -21,12 +21,12 @@ sub load_file($class, $filename, %options) {
 
 my sub filter_entries($entries, $time, $api_version) {
 	for my $entry ($entries->@*) {
-		next if $api_version != $entry->{majorApiVersion};
+		next if defined $api_version && $api_version != $entry->{majorApiVersion};
 		next if parse_time($entry->{validFor}{start}) > $time;
 		next if $entry->{validFor}{end} and parse_time($entry->{validFor}{end}) < $time;
-		return $entry->{url};
+		return $entry->{url} => $entry->{majorApiVersion};
 	}
-	return undef;
+	return ();
 }
 
 for my $name (qw/oidc ca tsa tlog/) {
@@ -37,12 +37,13 @@ for my $name (qw/oidc ca tsa tlog/) {
 
 sub load($class, $json, %options) {
 	my $time = delete $options{time} // time;
-	my $rekor = delete $options{rekor} // 1;
+	my $rekor = delete $options{rekor};
 
-	my $oidc = filter_entries($json->{oidcUrls}, $time, 1) or croak 'Could not find oidc url';
-	my $ca = filter_entries($json->{caUrls}, $time, 1) or croak 'Could not find CA url';
-	my $tsa = filter_entries($json->{tsaUrls}, $time, 1) or croak 'Could not find TSA url';
-	my $tlog = filter_entries($json->{rekorTlogUrls}, $time, $rekor) or croak 'Could not find tlog url';
+	my ($oidc) = filter_entries($json->{oidcUrls}, $time, 1) or croak 'Could not find oidc url';
+	my ($ca) = filter_entries($json->{caUrls}, $time, 1) or croak 'Could not find CA url';
+	my ($tsa) = filter_entries($json->{tsaUrls}, $time, 1) or croak 'Could not find TSA url';
+	my ($tlog, $version) = filter_entries($json->{rekorTlogUrls}, $time, $rekor) or croak 'Could not find tlog url';
+	$rekor //= $version;
 
 	return bless {
 		oidc  => $oidc,
@@ -153,6 +154,32 @@ sub _get_transparency_log_v1($self, $digest, $signature, $rekord, $certificate) 
 	};
 }
 
+sub _get_transparency_log_v2($self, $digest, $signature, $certificate) {
+	my %rekord = (
+		hashedRekordRequestV002 => {
+			signature => {
+				content => encode_base64($signature, ''),
+				verifier => {
+					x509Certificate => {
+						rawBytes => encode_base64($certificate->encode_der, ''),
+					},
+					keyDetails => 'PKIX_ECDSA_P256_SHA_256',
+				},
+			},
+			digest => encode_base64($digest, ''),
+		},
+	);
+	my $payload = encode_json(\%rekord);
+
+	my $rekor_url = $self->{tlog};
+	my $rekor_response = $self->{http}->post("$rekor_url/api/v2/log/entries", {
+		headers => { 'content-type' => 'application/json' },
+		content => $payload,
+	});
+	croak "Could not get transparency entry: $rekor_response->{content}" if $rekor_response->{status} != 201;
+	return decode_json($rekor_response->{content});
+}
+
 my sub make_bundle($digest, $signature, $certificate, $timestamp, $rekor_entry) {
 	return (
 		mediaType => 'application/vnd.dev.sigstore.bundle.v0.3+json',
@@ -179,23 +206,28 @@ sub sign($self, $content, $token) {
 	my ($certificate) = $self->_get_certificate($key, $token);
 	my $timestamp = $self->_get_timestamp($signature);
 
-	my %rekord = (
-		kind => 'hashedrekord',
-		apiversion => '0.0.1',
-		spec => {
-			data => {
-				hash => {
-					algorithm => 'sha256',
-					value     => unpack('H*', $digest),
+	my $rekor_response;
+	if ($self->{rekor} == 1) {
+		my %rekord = (
+			kind => 'hashedrekord',
+			apiversion => '0.0.1',
+			spec => {
+				data => {
+					hash => {
+						algorithm => 'sha256',
+						value     => unpack('H*', $digest),
+					},
+				},
+				signature => {
+					content   => encode_base64($signature, ''),
+					publicKey => { content => serialize_cert($certificate) },
 				},
 			},
-			signature => {
-				content   => encode_base64($signature, ''),
-				publicKey => { content => serialize_cert($certificate) },
-			},
-		},
-	);
-	my $rekor_response = $self->_get_transparency_log_v1($digest, $signature, \%rekord, $certificate);
+		);
+		$rekor_response = $self->_get_transparency_log_v1($digest, $signature, \%rekord, $certificate);
+	} elsif ($self->{rekor} == 2) {
+		$rekor_response = $self->_get_transparency_log_v2($digest, $signature, $certificate);
+	}
 
 	my %bundle = make_bundle($digest, $signature, $certificate, $timestamp, $rekor_response);
 	$bundle{messageSignature} = {
@@ -234,18 +266,23 @@ sub attest($self, $content, $filename, $token) {
 	);
 	my $envelope = JSON::PP->new->canonical->encode(\%envelope);
 
-	my %rekord = (
-		kind => 'dsse',
-		apiversion => '0.0.1',
-		spec => {
-			data => { hash => { value => unpack 'H*', $digest } },
-			proposedContent => {
-				envelope  => $envelope,
-				verifiers => [ serialize_cert($certificate) ],
-			}
-		},
-	);
-	my $rekor_response = $self->_get_transparency_log_v1($digest, $signature, \%rekord, $certificate);
+	my $rekor_response;
+	if ($self->{rekor} == 1) {
+		my %rekord = (
+			kind => 'dsse',
+			apiversion => '0.0.1',
+			spec => {
+				data => { hash => { value => unpack 'H*', $digest } },
+				proposedContent => {
+					envelope  => $envelope,
+					verifiers => [ serialize_cert($certificate) ],
+				}
+			},
+		);
+		$rekor_response = $self->_get_transparency_log_v1($digest, $signature, \%rekord, $certificate);
+	} elsif ($self->{rekor} == 2) {
+		$rekor_response = $self->_get_transparency_log_v2($digest, $signature, $certificate);
+	}
 
 	my %bundle = make_bundle($digest, $signature, $certificate, $timestamp, $rekor_response);
 	$bundle{dsseEnvelope} = \%envelope;
