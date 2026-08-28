@@ -139,8 +139,8 @@ sub verify($self, $content, $trusted_root, %options) {
 
 	my @timestamps;
 	for my $signed_timestamp (($self->{signed_timestamps} // [])->@*) {
-		my $timestamp = $trusted_root->verify_timestamp($signature, $signed_timestamp);
-		push @timestamps, $timestamp if defined $timestamp;
+		my $timestamp = $trusted_root->verify_timestamp($signature, $signed_timestamp) or croak 'Invalid timestamp';
+		push @timestamps, $timestamp;
 	}
 
 	my $valid_logs = 0;
@@ -207,11 +207,10 @@ sub verify($self, $content, $trusted_root, %options) {
 	if (my $cert = $self->{cert}) {
 		my $verified = 0;
 		my $timestamps = $self->{signed_timestamps} // [];
+		croak "No timestamps found" if not @timestamps;
 		for my $timestamp (@timestamps) {
-			$verified++ if $trusted_root->verify_certificate($cert, $timestamp, $self->{untrusted});
+			croak "Certificate validation failed" unless $trusted_root->verify_certificate($cert, $timestamp, $self->{untrusted});
 		}
-
-		croak 'Could not verify certificate' if not $verified;
 
 		if (not $options{skip_scts}) {
 			my $trusted_sct = 0;
