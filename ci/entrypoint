@@ -16,8 +16,8 @@ use Sigstore::TrustedRoot;
 my $command = shift;
 die "No command given" unless defined $command;
 
-my $prod_dir    = catdir($Bin, updir, 'ci','prod');
-my $staging_dir = catdir($Bin, updir, 'ci', 'staging');
+my $prod_dir    = catdir($Bin, updir, 'roots','production');
+my $staging_dir = catdir($Bin, updir, 'roots', 'staging');
 
 if ($command eq 'verify-bundle') {
 	GetOptions(

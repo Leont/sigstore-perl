@@ -12,6 +12,7 @@ use HTTP::Tiny;
 use MIME::Base64;
 use JSON::PP;
 use Time::Piece;
+our @CARP_NOT = 'Sigstore::ConfigFrom';
 
 sub load_file($class, $filename, %options) {
 	my $content = read_binary($filename);
@@ -300,11 +301,11 @@ sub attest_file($self, $filename, $token) {
 
 =head1 SYNOPSIS
 
- my $signer = Sigstore::Signer->load_file($config);
+ my $config = Sigstore::ConfigFrom::SharedDir->new(mode => 'production');
+ my $signer = $config->signing_config;
  my $bundle_data = $signer->sign_file($token_response->{content}, $artifact);
  my $bundle = Sigstore::Bundle->load($bundle_data);
- my $trusted_root = Sigstore::TrustedRoot->load($trusted_root_file);
- $bundle->verify_file($artifact, $trusted_root);
+ $bundle->verify_file($artifact, $config->trusted_root);
  write_file($bundle_name, encode_json($bundle_data));
 
 =head2 DESCRIPTION

@@ -12,6 +12,7 @@ use JSON::PP;
 use File::Temp 'tempfile';
 use MIME::Base64;
 use Time::Piece;
+our @CARP_NOT = 'Sigstore::ConfigFrom';
 
 use constant {
 	VFY_DATA               => Crypt::OpenSSL3::Timestamp::Verifier::VFY_DATA,

@@ -257,8 +257,8 @@ sub metadata($self) {
 =head1 SYNOPSIS
 
  my $bundle = Sigstore::Bundle->load_file($bundle_file);
- my $trusted_root = Sigstore::TrustedRoot->load_file($trusted_root_file);
- $bundle->verify_file($artifact, $trusted_root);
+ my $config = Sigstore::ConfigFrom::ShareDir->new;
+ $bundle->verify_file($artifact, $config->trusted_root);
 
 =head2 DESCRIPTION
 
